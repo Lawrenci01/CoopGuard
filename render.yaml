@@ -4,8 +4,9 @@ services:
     runtime: node
     region: singapore
     plan: free
-    buildCommand: npm --prefix backend ci && npm --prefix backend run typecheck
-    startCommand: npm --prefix backend start
+    rootDir: backend
+    buildCommand: npm ci && npm run typecheck
+    startCommand: npm start
     healthCheckPath: /health
     maxShutdownDelaySeconds: 30
     envVars:

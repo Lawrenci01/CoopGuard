@@ -1,31 +1,17 @@
 {
-  "name": "coopguard-backend",
-  "version": "0.7.0",
+  "name": "coopguard",
+  "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "engines": {
-    "node": ">=24.13.0"
-  },
+  "description": "CoopGuard collaborative monorepo",
   "scripts": {
-    "start": "tsx src/server.ts",
-    "provision": "tsx src/provision.ts",
-    "provision:telemetry": "tsx src/provisionTelemetry.ts",
-    "reset-data": "tsx src/purge.ts",
-    "reprovision": "tsx src/reprovision.ts",
-    "test": "tsx --test tests/*.test.ts",
-    "typecheck": "tsc --noEmit",
-    "tls": "node scripts/create-local-tls.mjs"
-  },
-  "dependencies": {
-    "@fastify/rate-limit": "10.3.0",
-    "@libsql/client": "^0.18.0",
-    "@tursodatabase/sync": "^0.8.1",
-    "fastify": "5.12.5",
-    "zod": "4.6.5"
-  },
-  "devDependencies": {
-    "@types/node": "24.19.0",
-    "tsx": "4.23.15",
-    "typescript": "6.0.3"
+    "bootstrap": "npm --prefix backend ci && npm --prefix frontend ci",
+    "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
+    "test:backend": "npm --prefix backend test",
+    "test:frontend": "npm --prefix frontend test && npm --prefix frontend run test:ui",
+    "test": "npm run test:backend && npm run test:frontend",
+    "check": "npm run typecheck && npm test",
+    "start:backend": "npm --prefix backend start",
+    "start:frontend": "npm --prefix frontend start",
+    "build:android": "npm --prefix frontend run build:android"
   }
 }
