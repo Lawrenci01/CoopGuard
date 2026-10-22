@@ -1,6 +1,7 @@
 param(
   [string]$Ssid,
   [string]$Passphrase,
+  [switch]$DhcpFallback,
   [switch]$SkipTls,
   [switch]$Stop
 )
@@ -9,6 +10,44 @@ $ErrorActionPreference = 'Stop'
 $cgBackend = Split-Path -Parent $PSScriptRoot
 $cgLocal = Join-Path $cgBackend '.local'
 $cgConfigPath = Join-Path $cgLocal 'hotspot-config.json'
+$cgDhcpPidPath = Join-Path $cgLocal 'dhcp.pid'
+
+function Stop-CoopGuardDhcp {
+  if (-not (Test-Path -LiteralPath $cgDhcpPidPath)) { return }
+  $dhcpPid = [int](Get-Content -LiteralPath $cgDhcpPidPath -Raw)
+  $process = Get-CimInstance Win32_Process -Filter "ProcessId=$dhcpPid" -ErrorAction SilentlyContinue
+  if ($process -and $process.Name -eq 'node.exe' -and $process.CommandLine -like '*src/localDhcp.ts*') {
+    Stop-Process -Id $dhcpPid -Force
+  }
+  Remove-Item -LiteralPath $cgDhcpPidPath -Force -ErrorAction SilentlyContinue
+}
+
+function Start-CoopGuardDhcp {
+  param([string]$Address)
+  if (Test-Path -LiteralPath $cgDhcpPidPath) {
+    $dhcpPid = [int](Get-Content -LiteralPath $cgDhcpPidPath -Raw)
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$dhcpPid" -ErrorAction SilentlyContinue
+    if ($process -and $process.Name -eq 'node.exe' -and $process.CommandLine -like '*src/localDhcp.ts*') {
+      Write-Output "CoopGuard DHCP fallback already running (PID $dhcpPid)."
+      return
+    }
+    Remove-Item -LiteralPath $cgDhcpPidPath -Force -ErrorAction SilentlyContinue
+  }
+  $node = (Get-Command node.exe -ErrorAction Stop).Source
+  $process = Start-Process -FilePath $node -ArgumentList @('--import', 'tsx', 'src/localDhcp.ts', '--address', $Address) -WorkingDirectory $cgBackend -WindowStyle Hidden -RedirectStandardOutput (Join-Path $cgLocal 'dhcp.out.log') -RedirectStandardError (Join-Path $cgLocal 'dhcp.err.log') -PassThru
+  $process.Id | Set-Content -LiteralPath $cgDhcpPidPath
+  Start-Sleep -Milliseconds 750
+  if ($process.HasExited) {
+    $details = if (Test-Path -LiteralPath (Join-Path $cgLocal 'dhcp.err.log')) {
+      (Get-Content -LiteralPath (Join-Path $cgLocal 'dhcp.err.log') -Tail 8) -join [Environment]::NewLine
+    } else {
+      'No DHCP error log was written.'
+    }
+    Remove-Item -LiteralPath $cgDhcpPidPath -Force -ErrorAction SilentlyContinue
+    throw "The CoopGuard DHCP fallback failed to start.$([Environment]::NewLine)$details"
+  }
+  Write-Output "CoopGuard DHCP fallback started on $Address (PID $($process.Id))."
+}
 
 function Wait-WinRtOperation {
   param($Operation, [string]$Label)
@@ -69,6 +108,7 @@ function Find-HotspotAddress {
 
 $manager = Get-HotspotManager
 if ($Stop) {
+  Stop-CoopGuardDhcp
   if ([string]$manager.TetheringOperationalState -ne 'Off') {
     $null = Wait-WinRtOperation $manager.StopTetheringAsync() 'Stopping CoopGuard hotspot'
   }
@@ -88,6 +128,7 @@ $saved = $null
 if (Test-Path -LiteralPath $cgConfigPath) {
   $saved = Get-Content -LiteralPath $cgConfigPath -Raw | ConvertFrom-Json
 }
+$useDhcpFallback = $DhcpFallback.IsPresent -or ($saved -and $saved.dhcpFallback -eq $true)
 if (-not $Ssid) {
   $Ssid = if ($saved -and $saved.ssid) {
     [string]$saved.ssid
@@ -137,6 +178,7 @@ $payload = [ordered]@{
   ssid = $Ssid
   passphrase = $Passphrase
   wifiUrl = $wifiUrl
+  dhcpFallback = [bool]$useDhcpFallback
   updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
 } | ConvertTo-Json
 if (-not (Test-Path -LiteralPath $cgLocal)) {
@@ -162,8 +204,25 @@ if ($isAdministrator) {
   } else {
     New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8443 -Profile Any -InterfaceAlias $hotspotInterface -RemoteAddress LocalSubnet | Out-Null
   }
+  if ($useDhcpFallback) {
+    $dhcpRuleName = 'CoopGuard Laptop Hub DHCP'
+    $dhcpRule = Get-NetFirewallRule -DisplayName $dhcpRuleName -ErrorAction SilentlyContinue
+    if ($dhcpRule) {
+      $dhcpRule | Set-NetFirewallRule -Enabled True -Direction Inbound -Action Allow -Profile Any -InterfaceAlias $hotspotInterface | Out-Null
+      $dhcpRule | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress Any | Out-Null
+      $dhcpRule | Get-NetFirewallPortFilter | Set-NetFirewallPortFilter -Protocol UDP -LocalPort 67 | Out-Null
+    } else {
+      New-NetFirewallRule -DisplayName $dhcpRuleName -Direction Inbound -Action Allow -Protocol UDP -LocalPort 67 -Profile Any -InterfaceAlias $hotspotInterface -RemoteAddress Any | Out-Null
+    }
+  }
 } else {
   Write-Warning 'Run this command once as Administrator if Windows Firewall blocks phone access to TCP port 8443.'
+}
+
+if ($useDhcpFallback) {
+  Start-CoopGuardDhcp -Address $hotspotIp
+} else {
+  Stop-CoopGuardDhcp
 }
 
 if (-not $SkipTls) {
@@ -173,5 +232,6 @@ if (-not $SkipTls) {
 
 Write-Output "CoopGuard hotspot is ready: $Ssid"
 Write-Output "Hub address: $wifiUrl"
+Write-Output "DHCP source: $(if ($useDhcpFallback) { 'CoopGuard fallback' } else { 'Windows ICS' })"
 Write-Output "Private hotspot configuration: $cgConfigPath"
 Write-Output 'The passphrase is stored locally and will be embedded only in the short-lived hub pairing QR.'

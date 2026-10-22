@@ -220,6 +220,18 @@ change WiFi. The helper also disables Windows' five-minute no-client timeout so 
 stays available while the hub is running. Run the hotspot command once from Administrator PowerShell if it warns that the local
 TCP 8443 firewall rule could not be installed.
 
+If Windows Mobile Hotspot accepts WiFi authentication but never leases the phone a
+`192.168.137.x` address, enable the scoped CoopGuard DHCP fallback once from Administrator
+PowerShell:
+
+```powershell
+npm run hotspot:start -- -DhcpFallback
+```
+
+The setting is saved in the private hotspot configuration and reused by `hub:start`. The
+fallback binds only to the hotspot's private IPv4 address, assigns leases only on that `/24`, and
+stops with `hotspot:stop`; it does not listen on the laptop's upstream WiFi connection.
+
 The first run requires internet and creates `.local/coopguard-hub-sync.sqlite`, a local synchronized
 replica of the Render/Turso database. The older `.local/coopguard.sqlite` standalone-development
 database is kept separate and is not used by the commissioned hub. `hub:create` and `hub:start`

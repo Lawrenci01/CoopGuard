@@ -7,6 +7,9 @@ import { createApp } from "../src/app";
 import { createFarm, openDatabase } from "../src/database";
 import { createHubPairing, refreshHubPairing } from "../src/hubPairing";
 import { hashPassword } from "../src/passwords";
+import { installationChecks } from "../src/shared/domain/siteWorkflow";
+import { LocalFarmRepository } from "../src/shared/services/localFarmRepository";
+import { completeSiteSurvey } from "./siteTestFixture";
 
 test("a laptop hub is claimed once and replacement requires admin approval", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "coopguard-hub-pairing-"));
@@ -117,6 +120,87 @@ test("a laptop hub is claimed once and replacement requires admin approval", asy
   assert.equal(inventory.json().hub.id, first.config.hubId);
   assert.equal(inventory.json().nodes.length, 3);
   assert.equal(inventory.json().nodes[0].source, "simulated");
+
+  let preparedState: string | null = null;
+  const workflow = new LocalFarmRepository(
+    {
+      getItem: async () => preparedState,
+      setItem: async (_key, value) => {
+        preparedState = value;
+      },
+    },
+    () => now,
+  );
+  await workflow.load();
+  await workflow.dispatch({
+    type: "context",
+    patch: { role: "technician", connection: "local" },
+  });
+  await workflow.dispatch({ type: "saveSiteSurvey", value: completeSiteSurvey() });
+  await workflow.dispatch({ type: "approveSitePlan" });
+  await workflow.dispatch({ type: "startInstallation" });
+  for (const [key] of installationChecks)
+    await workflow.dispatch({
+      type: "siteChecklist",
+      stage: "installation",
+      key,
+      value: "passed",
+    });
+  await db
+    .prepare("UPDATE farms SET state=? WHERE id=?")
+    .run(preparedState!, farmId);
+
+  const telemetry = await app.inject({
+    method: "POST",
+    url: "/v1/telemetry/ingest",
+    headers: {
+      "x-coopguard-hub-id": first.config.hubId,
+      "x-coopguard-hub-token": first.config.hubSecret,
+    },
+    payload: {
+      schemaVersion: 1,
+      source: "simulated",
+      farmCode: firstClaim.json().farmCode,
+      hubId: first.config.hubId,
+      sentAt: new Date(now).toISOString(),
+      readings: inventory.json().nodes.map(
+        (node: { nodeId: string; section: string }, index: number) => ({
+          messageId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+          nodeId: node.nodeId,
+          sequence: 0,
+          section: node.section,
+          sampledAt: new Date(now).toISOString(),
+          firmwareVersion: "simulator-test",
+          configVersion: "test-v1",
+          readings: {
+            temperatureC: 28,
+            humidityPercent: 70,
+            ammoniaPpm: 8,
+            co2Ppm: 900,
+            litterMoisturePercent: 24,
+          },
+          quality: { calibrated: true, warmingUp: false, sensorsValid: true },
+          power: { batteryPercent: null },
+          radio: { rssiDbm: -70, snrDb: 8 },
+        }),
+      ),
+    },
+  });
+  assert.equal(telemetry.statusCode, 200, telemetry.body);
+
+  const beginCommissioning = await app.inject({
+    method: "POST",
+    url: `/v1/farms/${farmId}/actions`,
+    headers: { authorization: `Bearer ${technician}` },
+    payload: {
+      key: "00000000-0000-4000-8000-000000000099",
+      revision: 0,
+      action: { type: "beginCommissioning" },
+    },
+  });
+  assert.equal(beginCommissioning.statusCode, 200, beginCommissioning.body);
+  assert.equal(beginCommissioning.json().state.site.status, "commissioning");
+
   const duplicate = await app.inject({
     method: "POST",
     url: `/v1/farms/${farmId}/nodes`,

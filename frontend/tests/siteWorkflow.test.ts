@@ -52,7 +52,7 @@ test('a verified open house can become a control candidate but never activates f
     await repo.dispatch({ type: 'siteChecklist', stage: 'installation', key, value: 'passed' });
   await assert.rejects(
     repo.dispatch({ type: 'beginCommissioning' }),
-    /Pair the planned virtual hub and nodes/,
+    /Pair the planned hub and sensor nodes/,
   );
   await pairPlannedVirtualDevices(repo);
   await repo.dispatch({ type: 'beginCommissioning' });

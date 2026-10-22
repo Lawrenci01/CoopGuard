@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createApp } from "../src/app";
@@ -55,6 +55,26 @@ test("gateway simulator stores six months of marked history and preserves it aft
     configPath,
     `${JSON.stringify({ schemaVersion: 1, ...credentials }, null, 2)}\n`,
   );
+  writeFileSync(
+    `${configPath}.state.json`,
+    `${JSON.stringify({
+      sequences: { "NODE-OLD": 41 },
+      historyGeneratedFor: { "NODE-OLD": now },
+    })}\n`,
+  );
+  writeFileSync(
+    `${configPath}.spool.json`,
+    `${JSON.stringify([
+      {
+        schemaVersion: 1,
+        source: "simulated",
+        farmCode: "CG-PH-OLD00000",
+        hubId: "HUB-OLD00000000",
+        sentAt: new Date(now).toISOString(),
+        readings: [],
+      },
+    ])}\n`,
+  );
   const app = await createApp(db);
   const address = await app.listen({ host: "127.0.0.1", port: 0 });
   t.after(async () => {
@@ -84,6 +104,15 @@ test("gateway simulator stores six months of marked history and preserves it aft
       "60",
     ],
     { timeout: 60_000, maxBuffer: 2_000_000 },
+  );
+  assert.match(
+    result.stderr,
+    /Quarantined simulator state from a different hub or farm/,
+  );
+  assert.ok(
+    readdirSync(directory).some((name) =>
+      name.startsWith("gateway.json.spool.json.stale-"),
+    ),
   );
   assert.match(result.stdout, /Prepared \d+ historical reading/);
   const coverage = await db

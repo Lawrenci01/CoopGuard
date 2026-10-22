@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Flashlight, LockKeyhole, QrCode, X } from 'lucide-react-native';
@@ -26,11 +26,13 @@ export function QrScannerScreen({
   const [permission, requestPermission] = useCameraPermissions();
   const [torch, setTorch] = useState(false);
   const [locked, setLocked] = useState(false);
+  const scanLocked = useRef(false);
   const previewHeight = Math.min(520, Math.max(300, height * 0.54));
   const frameSize = Math.min(238, width - 96);
 
   useEffect(() => {
     if (visible) {
+      scanLocked.current = false;
       setLocked(false);
       setTorch(false);
     }
@@ -82,6 +84,12 @@ export function QrScannerScreen({
                 locked
                   ? undefined
                   : async ({ data }) => {
+                      // Camera frames can report the same QR multiple times before
+                      // React commits the locked state. Lock synchronously so a
+                      // duplicate scan cannot start and cancel an Android WiFi
+                      // network chooser that is already in progress.
+                      if (scanLocked.current) return;
+                      scanLocked.current = true;
                       setLocked(true);
                       await onScanned(data);
                     }

@@ -171,6 +171,25 @@ export async function createApp(
       })),
     });
   };
+  const persistentDeviceSetupReady = async (
+    farmId: string,
+    state: LocalFarmState,
+  ) => {
+    if (!state.site.survey || !state.site.plan) return false;
+    const status = await db
+      .prepare(
+        `SELECT h.last_seen_at lastSeenAt,
+          (SELECT COUNT(*) FROM telemetry_nodes n
+           WHERE n.farm_id=h.farm_id AND n.hub_id=h.id AND n.active=1
+             AND EXISTS (SELECT 1 FROM sensor_readings r WHERE r.node_id=n.id LIMIT 1)) reportingNodes
+         FROM telemetry_hubs h WHERE h.farm_id=? AND h.active=1`,
+      )
+      .get(farmId);
+    return (
+      status?.lastSeenAt != null &&
+      Number(status.reportingNodes ?? 0) >= state.site.plan.nodeCount
+    );
+  };
   let queue: Promise<unknown> = Promise.resolve();
   const serial = <T>(work: () => Promise<T>): Promise<T> => {
     const result = queue.then(work);
@@ -1078,6 +1097,7 @@ export async function createApp(
           },
         },
         now,
+        { deviceSetupReady: await persistentDeviceSetupReady(farmId, before) },
       );
       await repo.load();
       await repo.dispatch({

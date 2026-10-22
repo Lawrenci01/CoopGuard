@@ -4,7 +4,7 @@
     "slug": "coopguard",
     "scheme": "coopguard",
     "platforms": ["ios", "android"],
-    "version": "0.7.1",
+    "version": "0.7.2",
     "icon": "./assets/coopguard-logo.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -14,7 +14,7 @@
       "icon": "./assets/coopguard-logo.png"
     },
     "android": {
-      "versionCode": 16,
+      "versionCode": 17,
       "package": "com.coopguard.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/coopguard-logo.png",

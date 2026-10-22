@@ -263,6 +263,7 @@ export class LocalFarmRepository {
   constructor(
     private storage: KeyValueStorage,
     private clock = () => Date.now(),
+    private options: { deviceSetupReady?: boolean } = {},
   ) {
     this.state = seedLocalFarm(clock());
   }
@@ -397,8 +398,10 @@ export class LocalFarmRepository {
           !checklistComplete(s.site.installation, installationChecks)
         )
           throw new Error('Complete every required installation check first.');
-        if (!deviceSetupProgress(s.site, s.deviceSimulation).ready)
-          throw new Error('Pair the planned virtual hub and nodes before commissioning.');
+        if (
+          !(this.options.deviceSetupReady ?? deviceSetupProgress(s.site, s.deviceSimulation).ready)
+        )
+          throw new Error('Pair the planned hub and sensor nodes before commissioning.');
         s.site.status = 'commissioning';
         s.site.updatedAt = now;
         break;
@@ -445,7 +448,9 @@ export class LocalFarmRepository {
         requireTechnicianRole();
         if (s.site.status !== 'monitoring_trial' || !checklistComplete(s.site.trial, trialChecks))
           throw new Error('Complete the monitoring trial checks first.');
-        if (!deviceSetupProgress(s.site, s.deviceSimulation).ready)
+        if (
+          !(this.options.deviceSetupReady ?? deviceSetupProgress(s.site, s.deviceSimulation).ready)
+        )
           throw new Error('The planned hub and nodes must be paired and reporting.');
         if (a.mode === 'full' && s.site.plan?.recommendedMode !== 'full_candidate')
           throw new Error('This site is approved for monitor-only operation.');

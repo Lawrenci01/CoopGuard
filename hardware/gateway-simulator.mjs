@@ -130,6 +130,35 @@ if (!state || typeof state.sequences !== "object" || !Array.isArray(spool))
 if (!state.historyGeneratedFor || typeof state.historyGeneratedFor !== "object")
   state.historyGeneratedFor = {};
 
+const simulatorIdentity = `${config.farmCode}:${config.hubId}`;
+const savedIdentity =
+  typeof state.identity === "string" ? state.identity : undefined;
+const foreignQueue = spool.some(
+  (queued) =>
+    !queued ||
+    queued.farmCode !== config.farmCode ||
+    queued.hubId !== config.hubId,
+);
+
+if ((savedIdentity && savedIdentity !== simulatorIdentity) || foreignQueue) {
+  const suffix = Date.now();
+  if (existsSync(statePath))
+    renameSync(statePath, `${statePath}.stale-${suffix}`);
+  if (existsSync(spoolPath))
+    renameSync(spoolPath, `${spoolPath}.stale-${suffix}`);
+  state = {
+    identity: simulatorIdentity,
+    sequences: {},
+    historyGeneratedFor: {},
+  };
+  spool = [];
+  console.warn(
+    `Quarantined simulator state from a different hub or farm before generating telemetry for ${config.farmCode} / ${config.hubId}.`,
+  );
+} else {
+  state.identity = simulatorIdentity;
+}
+
 function simulatedReading(node, index, sampledAt) {
   const sequence = Number(state.sequences[node.id] ?? -1) + 1;
   state.sequences[node.id] = sequence;
